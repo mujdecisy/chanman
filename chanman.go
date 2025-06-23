@@ -15,6 +15,7 @@ type chanDef struct {
 	allowedMsgTypes []reflect.Type
 	listenerCount   int
 	channel         chan ChanMsg
+	killChan        chan int
 }
 
 type ChanMsg struct {
@@ -40,6 +41,17 @@ func InitChan(name string, bufferSize int, allowedMessageTypes []reflect.Type) e
 	return nil
 }
 
+func DestroyChan(name string) error {
+	for i, def := range chanDefs {
+		if def.name == name {
+			def.killChan <- 1
+			chanDefs = append(chanDefs[:i], chanDefs[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("channel with name %s not found", name)
+}
+
 func Sub(channelName string, listenerFunction func(msg ChanMsg) bool) error {
 	chdef, err := getChan(channelName)
 	if err != nil {
@@ -47,24 +59,33 @@ func Sub(channelName string, listenerFunction func(msg ChanMsg) bool) error {
 	}
 
 	if chdef.listenerCount > 0 {
-		fmt.Printf("[WRN] %d listener/s already exists for channel %s, adding another listener", chdef.listenerCount, channelName)
+		return fmt.Errorf("channel %s already has a listener", channelName)
 	}
 
-	chdef.listenerCount++
-
 	go func() {
-		for msg := range chdef.channel {
-			stopListening := listenerFunction(msg)
+		for {
+			select {
+			case msg := <-chdef.channel:
+				stopListening := listenerFunction(msg)
 
-			if stopListening {
-				chdef.listenerCount--
-				if chdef.listenerCount == 0 {
-					fmt.Printf("[WRN] No more listeners for channel %s, closing channel\n", channelName)
-					if err := removeChan(channelName); err != nil {
-						fmt.Printf("[ERR] Failed to remove channel %s: %v\n", channelName, err)
+				if stopListening {
+					chdef.listenerCount--
+					if chdef.listenerCount == 0 {
+						fmt.Printf("[WRN] No more listeners for channel %s, closing channel\n", channelName)
+						if err := removeChan(channelName); err != nil {
+							fmt.Printf("[ERR] Failed to remove channel %s: %v\n", channelName, err)
+						}
+						return
 					}
 				}
+			case <-chdef.killChan:
+				fmt.Printf("[WRN] Listener for channel %s is shutting down\n", channelName)
+				if err := removeChan(channelName); err != nil {
+					fmt.Printf("[ERR] Failed to remove channel %s: %v\n", channelName, err)
+				}
+				return
 			}
+
 		}
 	}()
 

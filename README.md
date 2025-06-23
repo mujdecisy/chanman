@@ -2,13 +2,13 @@
 
 An umbrella project for managing multiple channels in your golang application.
 
-# Installation
+## Installation
 
 ```bash
 go get github.com/mujdecisy/chanman
 ```
 
-# Usage
+## Usage
 
 ```go
 package main
@@ -49,5 +49,11 @@ func main() {
 
     // Give goroutine time to process
     time.Sleep(100 * time.Millisecond)
+
+    // Destroy the channel when done
+    err = chanman.DestroyChan("mychan")
+    if err != nil {
+        panic(err)
+    }
 }
 ```
