@@ -3,86 +3,80 @@ package chanman
 import (
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/google/uuid"
 )
 
-var chanDefs = []chanDef{}
-
-type chanDef struct {
-	name            string
-	bufferSize      int
-	allowedMsgTypes []reflect.Type
-	listenerCount   int
-	channel         chan ChanMsg
-	killChan        chan int
-}
-
-type ChanMsg struct {
-	Uuid string
-	Name string
-	Data any
-}
-
 func InitChan(name string, bufferSize int, allowedMessageTypes []reflect.Type) error {
-	for _, def := range chanDefs {
-		if def.name == name {
-			return fmt.Errorf("channel with name %s already exists", name)
-		}
+	_, err := getChan(name)
+	if err == nil {
+		return fmt.Errorf("channel with name %s already exists", name)
 	}
-	chanDefs = append(chanDefs, chanDef{
+
+	newChan := &chanDef{
 		name:            name,
 		bufferSize:      bufferSize,
 		allowedMsgTypes: allowedMessageTypes,
 		listenerCount:   0,
 		channel:         make(chan ChanMsg, bufferSize),
-	})
+		killChanList:    []*chan int{},
+	}
+
+	addChan(newChan)
+	logf("INF", "%s initialized\n\tbuffersize: %d", name, bufferSize)
 
 	return nil
 }
 
 func DestroyChan(name string) error {
-	for i, def := range chanDefs {
-		if def.name == name {
-			def.killChan <- 1
-			chanDefs = append(chanDefs[:i], chanDefs[i+1:]...)
-			return nil
+	ch, err := getChan(name)
+	if err != nil {
+		return fmt.Errorf("channel with name %s not found: %w", name, err)
+	}
+
+	if ch.listenerCount > 0 {
+		for _, kc := range ch.killChanList {
+			*kc <- 1
 		}
 	}
-	return fmt.Errorf("channel with name %s not found", name)
+
+	time.Sleep(200 * time.Millisecond)
+	removeChan(name)
+
+	return nil
 }
 
 func Sub(channelName string, listenerFunction func(msg ChanMsg) bool) error {
 	chdef, err := getChan(channelName)
 	if err != nil {
+		logf("ERR", "%s sub failed\n\t%v", channelName, err)
 		return fmt.Errorf("failed to subscribe to channel %s: %w", channelName, err)
 	}
 
-	if chdef.listenerCount > 0 {
-		return fmt.Errorf("channel %s already has a listener", channelName)
+	increaseListenerCount(channelName)
+
+	if chdef.listenerCount > 1 {
+		logf("WRN", "%s already has listeners\n\tlistener count: %d", channelName, chdef.listenerCount)
 	}
 
+	killChan := make(chan int)
+	chdef.killChanList = append(chdef.killChanList, &killChan)
+
 	go func() {
+		logf("INF", "%s sub started", channelName)
 		for {
 			select {
 			case msg := <-chdef.channel:
+				logf("INF", "%s recieved msg <%s>", channelName, msg.Uuid)
 				stopListening := listenerFunction(msg)
 
 				if stopListening {
-					chdef.listenerCount--
-					if chdef.listenerCount == 0 {
-						fmt.Printf("[WRN] No more listeners for channel %s, closing channel\n", channelName)
-						if err := removeChan(channelName); err != nil {
-							fmt.Printf("[ERR] Failed to remove channel %s: %v\n", channelName, err)
-						}
-						return
-					}
+					decreaseListenerCount(channelName)
+					logf("INF", "%s lost a listener\n\tlistener count: %d", channelName, chdef.listenerCount)
 				}
-			case <-chdef.killChan:
-				fmt.Printf("[WRN] Listener for channel %s is shutting down\n", channelName)
-				if err := removeChan(channelName); err != nil {
-					fmt.Printf("[ERR] Failed to remove channel %s: %v\n", channelName, err)
-				}
+			case <-killChan:
+				logf("INF", "%s is closing", channelName)
 				return
 			}
 
@@ -95,7 +89,7 @@ func Sub(channelName string, listenerFunction func(msg ChanMsg) bool) error {
 func Pub(channelName string, msg any) error {
 	chdef, err := getChan(channelName)
 	if err != nil {
-		return fmt.Errorf("failed to subscribe to channel %s: %w", channelName, err)
+		return fmt.Errorf("failed to publish to channel %s: %w", channelName, err)
 	}
 
 	if chdef.listenerCount == 0 {
@@ -122,25 +116,19 @@ func Pub(channelName string, msg any) error {
 	msgUuid := uuid.New().String()[:8]
 	chdef.channel <- ChanMsg{Uuid: msgUuid, Name: channelName, Data: msg}
 
+	logf("INF", "%s published msg<%s>", channelName, msgUuid)
+
 	return nil
 }
 
-func getChan(name string) (*chanDef, error) {
-	for _, def := range chanDefs {
-		if def.name == name {
-			return &def, nil
-		}
-	}
-	return nil, fmt.Errorf("channel with name %s not found", name)
-}
+func SetVerbose(verbose bool) {
+	chanManServiceInstance.mutex.Lock()
+	defer chanManServiceInstance.mutex.Unlock()
 
-func removeChan(name string) error {
-	for i, def := range chanDefs {
-		if def.name == name {
-			close(def.channel)
-			chanDefs = append(chanDefs[:i], chanDefs[i+1:]...)
-			return nil
-		}
+	chanManServiceInstance.verbose = verbose
+	if verbose {
+		logf("INF", "verbose mode enabled")
+	} else {
+		logf("INF", "verbose mode disabled")
 	}
-	return fmt.Errorf("channel with name %s not found", name)
 }
