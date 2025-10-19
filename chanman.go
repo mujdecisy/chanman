@@ -3,6 +3,7 @@ package chanman
 import (
 	"fmt"
 	"reflect"
+	"runtime"
 	"time"
 
 	"github.com/google/uuid"
@@ -87,6 +88,9 @@ func Sub(channelName string, listenerFunction func(msg ChanMsg) bool) error {
 }
 
 func Pub(channelName string, msg any) error {
+	pc, _, _, _ := runtime.Caller(1)
+	funcName := runtime.FuncForPC(pc).Name()
+
 	chdef, err := getChan(channelName)
 	if err != nil {
 		return fmt.Errorf("failed to publish to channel %s: %w", channelName, err)
@@ -116,7 +120,7 @@ func Pub(channelName string, msg any) error {
 	msgUuid := uuid.New().String()[:8]
 	chdef.channel <- ChanMsg{Uuid: msgUuid, Name: channelName, Data: msg}
 
-	logf("INF", "%s published msg<%s>", channelName, msgUuid)
+	logf("INF", "%s published msg<%s> by [%s]", channelName, msgUuid, funcName)
 
 	return nil
 }
