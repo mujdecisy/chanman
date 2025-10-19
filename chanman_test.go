@@ -84,3 +84,35 @@ func TestSubTwice(t *testing.T) {
 	}
 	chanman.DestroyChan(name)
 }
+
+func TestPubCallerInfo(t *testing.T) {
+	name := "testchan4"
+	allowedTypes := []reflect.Type{reflect.TypeOf("")}
+
+	chanman.SetVerbose(true)
+	defer chanman.SetVerbose(false)
+
+	err := chanman.InitChan(name, 1, allowedTypes)
+	if err != nil {
+		t.Fatalf("InitChan failed: %v", err)
+	}
+
+	err = chanman.Sub(name, func(msg chanman.ChanMsg) bool { return false })
+	if err != nil {
+		t.Fatalf("Sub failed: %v", err)
+	}
+
+	err = pubWrapper(name)
+	if err != nil {
+		t.Fatalf("Pub failed: %v", err)
+	}
+
+	err = chanman.DestroyChan(name)
+	if err != nil {
+		t.Fatalf("DestroyChan failed: %v", err)
+	}
+}
+
+func pubWrapper(channelName string) error {
+	return chanman.Pub(channelName, "test message")
+}
