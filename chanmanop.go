@@ -116,7 +116,7 @@ func getAndIncMsgNumber(name string) (int64, error) {
 	return -1, fmt.Errorf("channel with name %s not found", name)
 }
 
-func pubWithId(channelName string, msg any, id string) (ChanMsg, error) {
+func pubWithTag(channelName string, msg any, tag string) (ChanMsg, error) {
 	chdef, err := getChan(channelName)
 	if err != nil {
 		return ChanMsg{}, fmt.Errorf("failed to publish to channel %s: %w", channelName, err)
@@ -148,7 +148,7 @@ func pubWithId(channelName string, msg any, id string) (ChanMsg, error) {
 		return ChanMsg{}, fmt.Errorf("failed to get message counter for channel %s: %w", channelName, err)
 	}
 
-	chanMsg := ChanMsg{Id: id, Number: msgNumber, Name: channelName, Data: msg}
+	chanMsg := ChanMsg{Tag: tag, Number: msgNumber, Name: channelName, Data: msg}
 	chdef.channel <- chanMsg
 
 	return chanMsg, nil

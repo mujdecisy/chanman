@@ -6,7 +6,7 @@ import (
 )
 
 type ChanMsg struct {
-	Id     string
+	Tag    string
 	Number int64
 	Name   string
 	Data   any

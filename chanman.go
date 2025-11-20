@@ -70,8 +70,8 @@ func Sub(channelName string, listenerFunction func(msg ChanMsg) bool) error {
 		for {
 			select {
 			case msg := <-chdef.channel:
-				if msg.Id != "" {
-					logf("INF", "%s recieved msg#%d <%s>", channelName, msg.Number, msg.Id)
+				if msg.Tag != "" {
+					logf("INF", "%s recieved msg#%d <%s>", channelName, msg.Number, msg.Tag)
 				} else {
 					logf("INF", "%s recieved msg#%d", channelName, msg.Number)
 				}
@@ -97,29 +97,29 @@ func Pub(channelName string, msg any) error {
 	pc, _, _, _ := runtime.Caller(1)
 	funcName := runtime.FuncForPC(pc).Name()
 
-	chanMsg, err := pubWithId(channelName, msg, "")
+	chanMsg, err := pubWithTag(channelName, msg, "")
 	if err != nil {
 		return fmt.Errorf("failed to publish to channel %s: %w", channelName, err)
 	}
 
-	if chanMsg.Id != "" {
-		logf("INF", "%s published msg#%d <%s> by [%s]", channelName, chanMsg.Number, chanMsg.Id, funcName)
+	if chanMsg.Tag != "" {
+		logf("INF", "%s published msg#%d <%s> by [%s]", channelName, chanMsg.Number, chanMsg.Tag, funcName)
 	} else {
 		logf("INF", "%s published msg#%d by [%s]", channelName, chanMsg.Number, funcName)
 	}
 	return nil
 }
 
-func PubWithId(channelName string, msg any, id string) error {
+func PubWithTag(channelName string, msg any, tag string) error {
 	pc, _, _, _ := runtime.Caller(1)
 	funcName := runtime.FuncForPC(pc).Name()
 
-	chanMsg, err := pubWithId(channelName, msg, id)
+	chanMsg, err := pubWithTag(channelName, msg, tag)
 	if err != nil {
 		return fmt.Errorf("failed to publish to channel %s: %w", channelName, err)
 	}
 
-	logf("INF", "%s published msg#%d <%s> by [%s]", channelName, chanMsg.Number, chanMsg.Id, funcName)
+	logf("INF", "%s published msg#%d <%s> by [%s]", channelName, chanMsg.Number, chanMsg.Tag, funcName)
 	return nil
 }
 
