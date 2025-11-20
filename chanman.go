@@ -4,9 +4,8 @@ import (
 	"fmt"
 	"reflect"
 	"runtime"
+	"sync"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 func InitChan(name string, bufferSize int, allowedMessageTypes []reflect.Type) error {
@@ -21,7 +20,9 @@ func InitChan(name string, bufferSize int, allowedMessageTypes []reflect.Type) e
 		allowedMsgTypes: allowedMessageTypes,
 		listenerCount:   0,
 		channel:         make(chan ChanMsg, bufferSize),
+		msgCounter:      0,
 		killChanList:    []*chan int{},
+		mutex:           sync.RWMutex{},
 	}
 
 	addChan(newChan)
@@ -69,7 +70,12 @@ func Sub(channelName string, listenerFunction func(msg ChanMsg) bool) error {
 		for {
 			select {
 			case msg := <-chdef.channel:
-				logf("INF", "%s recieved msg <%s>", channelName, msg.Uuid)
+				if msg.Id != "" {
+					logf("INF", "%s recieved msg#%d <%s>", channelName, msg.Number, msg.Id)
+				} else {
+					logf("INF", "%s recieved msg#%d", channelName, msg.Number)
+				}
+
 				stopListening := listenerFunction(msg)
 
 				if stopListening {
@@ -91,37 +97,29 @@ func Pub(channelName string, msg any) error {
 	pc, _, _, _ := runtime.Caller(1)
 	funcName := runtime.FuncForPC(pc).Name()
 
-	chdef, err := getChan(channelName)
+	chanMsg, err := pubWithId(channelName, msg, "")
 	if err != nil {
 		return fmt.Errorf("failed to publish to channel %s: %w", channelName, err)
 	}
 
-	if chdef.listenerCount == 0 {
-		return fmt.Errorf("no subscribers found for channel %s, message will be discarded", channelName)
+	if chanMsg.Id != "" {
+		logf("INF", "%s published msg#%d <%s> by [%s]", channelName, chanMsg.Number, chanMsg.Id, funcName)
+	} else {
+		logf("INF", "%s published msg#%d by [%s]", channelName, chanMsg.Number, funcName)
+	}
+	return nil
+}
+
+func PubWithId(channelName string, msg any, id string) error {
+	pc, _, _, _ := runtime.Caller(1)
+	funcName := runtime.FuncForPC(pc).Name()
+
+	chanMsg, err := pubWithId(channelName, msg, id)
+	if err != nil {
+		return fmt.Errorf("failed to publish to channel %s: %w", channelName, err)
 	}
 
-	if len(chdef.channel) >= chdef.bufferSize {
-		return fmt.Errorf("channel %s is full, message will be discarded", channelName)
-	}
-
-	msgType := reflect.TypeOf(msg)
-	pubAllowed := false
-	for _, allowedType := range chdef.allowedMsgTypes {
-		if msgType == allowedType {
-			pubAllowed = true
-			break
-		}
-	}
-
-	if !pubAllowed {
-		return fmt.Errorf("message type %s not allowed for channel %s", msgType, channelName)
-	}
-
-	msgUuid := uuid.New().String()[:8]
-	chdef.channel <- ChanMsg{Uuid: msgUuid, Name: channelName, Data: msg}
-
-	logf("INF", "%s published msg<%s> by [%s]", channelName, msgUuid, funcName)
-
+	logf("INF", "%s published msg#%d <%s> by [%s]", channelName, chanMsg.Number, chanMsg.Id, funcName)
 	return nil
 }
 

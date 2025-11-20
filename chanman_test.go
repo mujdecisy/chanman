@@ -1,8 +1,10 @@
 package chanman_test
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/mujdecisy/chanman"
 )
@@ -115,4 +117,67 @@ func TestPubCallerInfo(t *testing.T) {
 
 func pubWrapper(channelName string) error {
 	return chanman.Pub(channelName, "test message")
+}
+
+func TestMessageNumberIncrease(t *testing.T) {
+	allowedTypes := []reflect.Type{reflect.TypeOf("")}
+	name := "testchan5"
+
+	err := chanman.InitChan(name, 10, allowedTypes)
+	if err != nil {
+		t.Fatalf("InitChan failed: %v", err)
+	}
+
+	chanman.SetVerbose(true)
+
+	var receivedNumbers []int64
+	messageCount := 0
+
+	err = chanman.Sub(name, func(msg chanman.ChanMsg) bool {
+		fmt.Println("RECEIVED MSG NUM:", msg.Number)
+		messageCount++
+		receivedNumbers = append(receivedNumbers, msg.Number)
+		return false
+	})
+	if err != nil {
+		t.Fatalf("Sub failed: %v", err)
+	}
+
+	for i := 0; i < 3; i++ {
+		err = chanman.Pub(name, "test message")
+		if err != nil {
+			t.Fatalf("Pub failed on message %d: %v", i+1, err)
+		}
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	if messageCount < 3 {
+		t.Fatalf("Expected to receive 3 messages, got %d", messageCount)
+	}
+
+	if len(receivedNumbers) < 3 {
+		t.Fatalf("Expected at least 3 message numbers, got %d", len(receivedNumbers))
+	}
+
+	testNumbers := receivedNumbers[:3]
+
+	for i := 1; i < len(testNumbers); i++ {
+		if testNumbers[i] <= testNumbers[i-1] {
+			t.Errorf("Message number should increase: msg[%d] = %d, msg[%d] = %d",
+				i-1, testNumbers[i-1], i, testNumbers[i])
+		}
+	}
+
+	expectedNumbers := []int64{0, 1, 2}
+	for i, expected := range expectedNumbers {
+		if testNumbers[i] != expected {
+			t.Errorf("Expected message %d to have number %d, got %d", i, expected, testNumbers[i])
+		}
+	}
+
+	err = chanman.DestroyChan(name)
+	if err != nil {
+		t.Fatalf("DestroyChan failed: %v", err)
+	}
 }

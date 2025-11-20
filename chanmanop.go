@@ -1,6 +1,9 @@
 package chanman
 
-import "fmt"
+import (
+	"fmt"
+	"reflect"
+)
 
 func logf(level, format string, args ...any) {
 	if !chanManServiceInstance.verbose {
@@ -97,4 +100,56 @@ func decreaseListenerCount(name string) error {
 		}
 	}
 	return fmt.Errorf("channel with name %s not found", name)
+}
+
+func getAndIncMsgNumber(name string) (int64, error) {
+	cds := &chanManServiceInstance.chanDefs
+	for i := range *cds {
+		if (*cds)[i].name == name {
+			(*cds)[i].mutex.Lock()
+			defer (*cds)[i].mutex.Unlock()
+			number := (*cds)[i].msgCounter
+			(*cds)[i].msgCounter++
+			return number, nil
+		}
+	}
+	return -1, fmt.Errorf("channel with name %s not found", name)
+}
+
+func pubWithId(channelName string, msg any, id string) (ChanMsg, error) {
+	chdef, err := getChan(channelName)
+	if err != nil {
+		return ChanMsg{}, fmt.Errorf("failed to publish to channel %s: %w", channelName, err)
+	}
+
+	if chdef.listenerCount == 0 {
+		return ChanMsg{}, fmt.Errorf("no subscribers found for channel %s, message will be discarded", channelName)
+	}
+
+	if len(chdef.channel) >= chdef.bufferSize {
+		return ChanMsg{}, fmt.Errorf("channel %s is full, message will be discarded", channelName)
+	}
+
+	msgType := reflect.TypeOf(msg)
+	pubAllowed := false
+	for _, allowedType := range chdef.allowedMsgTypes {
+		if msgType == allowedType {
+			pubAllowed = true
+			break
+		}
+	}
+
+	if !pubAllowed {
+		return ChanMsg{}, fmt.Errorf("message type %s not allowed for channel %s", msgType, channelName)
+	}
+
+	msgNumber, err := getAndIncMsgNumber(channelName)
+	if err != nil {
+		return ChanMsg{}, fmt.Errorf("failed to get message counter for channel %s: %w", channelName, err)
+	}
+
+	chanMsg := ChanMsg{Id: id, Number: msgNumber, Name: channelName, Data: msg}
+	chdef.channel <- chanMsg
+
+	return chanMsg, nil
 }

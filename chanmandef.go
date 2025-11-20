@@ -6,9 +6,10 @@ import (
 )
 
 type ChanMsg struct {
-	Uuid string
-	Name string
-	Data any
+	Id     string
+	Number int64
+	Name   string
+	Data   any
 }
 
 type chanDef struct {
@@ -17,7 +18,9 @@ type chanDef struct {
 	allowedMsgTypes []reflect.Type
 	listenerCount   int
 	channel         chan ChanMsg
+	msgCounter      int64
 	killChanList    []*chan int
+	mutex           sync.RWMutex
 }
 
 type chanManService struct {
