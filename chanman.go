@@ -49,7 +49,7 @@ func DestroyChan(name string) error {
 	return nil
 }
 
-func Sub(channelName string, listenerFunction func(msg ChanMsg) bool) error {
+func Sub(channelName string, timeout time.Duration, listenerFunction func(msg ChanMsg) bool) error {
 	chdef, err := getChan(channelName)
 	if err != nil {
 		logf("ERR", "%s sub failed\n\t%v", channelName, err)
@@ -70,13 +70,26 @@ func Sub(channelName string, listenerFunction func(msg ChanMsg) bool) error {
 		for {
 			select {
 			case msg := <-chdef.channel:
+				msgLabel := fmt.Sprintf("msg#%d", msg.Number)
 				if msg.Tag != "" {
-					logf("INF", "%s recieved msg#%d <%s>", channelName, msg.Number, msg.Tag)
-				} else {
-					logf("INF", "%s recieved msg#%d", channelName, msg.Number)
+					msgLabel += fmt.Sprintf(" <%s>", msg.Tag)
 				}
+				logf("INF", "%s recieved %s", channelName, msgLabel)
 
-				stopListening := listenerFunction(msg)
+				// Execute listener function with timeout
+				done := make(chan bool, 1)
+				go func() {
+					done <- listenerFunction(msg)
+				}()
+
+				var stopListening bool
+				select {
+				case stopListening = <-done:
+					// Listener completed within timeout
+				case <-time.After(timeout):
+					logf("WRN", "%s listener function timed out after %v for %s", channelName, timeout, msgLabel)
+					stopListening = false
+				}
 
 				if stopListening {
 					decreaseListenerCount(channelName)

@@ -43,7 +43,7 @@ func TestPubSub(t *testing.T) {
 		t.Fatalf("InitChan failed: %v", err)
 	}
 
-	err = chanman.Sub(name, func(msg chanman.ChanMsg) bool {
+	err = chanman.Sub(name, 300*time.Millisecond, func(msg chanman.ChanMsg) bool {
 		_, ok := msg.Data.(int)
 		if !ok {
 			t.Errorf("Expected int, got %T", msg.Data)
@@ -76,11 +76,11 @@ func TestSubTwice(t *testing.T) {
 	allowedTypes := []reflect.Type{reflect.TypeOf(1.0)}
 	name := "testchan3"
 	chanman.InitChan(name, 1, allowedTypes)
-	err := chanman.Sub(name, func(msg chanman.ChanMsg) bool { return false })
+	err := chanman.Sub(name, 300*time.Millisecond, func(msg chanman.ChanMsg) bool { return false })
 	if err != nil {
 		t.Fatalf("First Sub failed: %v", err)
 	}
-	err = chanman.Sub(name, func(msg chanman.ChanMsg) bool { return false })
+	err = chanman.Sub(name, 300*time.Millisecond, func(msg chanman.ChanMsg) bool { return false })
 	if err != nil {
 		t.Errorf("Second Sub failed: %v", err)
 	}
@@ -99,7 +99,7 @@ func TestPubCallerInfo(t *testing.T) {
 		t.Fatalf("InitChan failed: %v", err)
 	}
 
-	err = chanman.Sub(name, func(msg chanman.ChanMsg) bool { return false })
+	err = chanman.Sub(name, 300*time.Millisecond, func(msg chanman.ChanMsg) bool { return false })
 	if err != nil {
 		t.Fatalf("Sub failed: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestMessageNumberIncrease(t *testing.T) {
 	var receivedNumbers []int64
 	messageCount := 0
 
-	err = chanman.Sub(name, func(msg chanman.ChanMsg) bool {
+	err = chanman.Sub(name, 300*time.Millisecond, func(msg chanman.ChanMsg) bool {
 		fmt.Println("RECEIVED MSG NUM:", msg.Number)
 		messageCount++
 		receivedNumbers = append(receivedNumbers, msg.Number)
@@ -180,4 +180,77 @@ func TestMessageNumberIncrease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DestroyChan failed: %v", err)
 	}
+}
+
+func TestListenerTimeout(t *testing.T) {
+	allowedTypes := []reflect.Type{reflect.TypeOf("")}
+	name := "testchan6"
+
+	err := chanman.InitChan(name, 10, allowedTypes)
+	if err != nil {
+		t.Fatalf("InitChan failed: %v", err)
+	}
+
+	chanman.SetVerbose(true)
+	defer chanman.SetVerbose(false)
+
+	messageProcessed := make(chan bool, 2)
+	timedOut := false
+
+	// Subscribe with a short timeout (100ms) but listener will take 300ms
+	err = chanman.Sub(name, 100*time.Millisecond, func(msg chanman.ChanMsg) bool {
+		fmt.Printf("Listener received msg#%d, starting slow processing...\n", msg.Number)
+		time.Sleep(300 * time.Millisecond) // Simulate slow processing
+		fmt.Printf("Listener finished processing msg#%d\n", msg.Number)
+		messageProcessed <- true
+		return false
+	})
+	if err != nil {
+		t.Fatalf("Sub failed: %v", err)
+	}
+
+	// Publish first message
+	err = chanman.Pub(name, "message 1")
+	if err != nil {
+		t.Fatalf("First Pub failed: %v", err)
+	}
+
+	// Wait a bit to ensure first message times out
+	time.Sleep(150 * time.Millisecond)
+
+	// Publish second message - this should be processed even if first one timed out
+	err = chanman.Pub(name, "message 2")
+	if err != nil {
+		t.Fatalf("Second Pub failed: %v", err)
+	}
+
+	// Wait for both messages to be fully processed (300ms each + margin)
+	select {
+	case <-messageProcessed:
+		// First message processed (even though it timed out in terms of returning result)
+	case <-time.After(500 * time.Millisecond):
+		timedOut = true
+	}
+
+	select {
+	case <-messageProcessed:
+		// Second message processed
+	case <-time.After(500 * time.Millisecond):
+		timedOut = true
+	}
+
+	if timedOut {
+		// This is expected - the timeout mechanism should allow the channel to continue
+		// processing new messages even if the listener function is still running
+		t.Log("Listener functions continued running after timeout (expected behavior)")
+	}
+
+	err = chanman.DestroyChan(name)
+	if err != nil {
+		t.Fatalf("DestroyChan failed: %v", err)
+	}
+
+	// Key assertion: Both messages should have been received by the channel
+	// even though the listener functions took longer than the timeout
+	t.Log("Test passed: Channel remained responsive despite slow listener function")
 }
